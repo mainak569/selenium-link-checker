@@ -33,7 +33,7 @@ A plain HTTP client only sees the server's response. Several real problems only 
 - **Page load time** from the Navigation Timing API, with slow pages flagged
 - **Screenshots** of every page that has a problem
 - **Redirects** listed as warnings with their final URL, so they can be updated
-- **Flaky-result handling**: transient failures are retried, and browser-side problems must happen again on a reload before they are reported
+- **Flaky-result handling**: transient failures are retried, and browser-side problems must happen again when the page is re-checked after the crawl before they are reported
 - **Reports**: a self-contained `index.html` (no external CSS/JS, works offline), `results.json` with the same data, and a Markdown summary on the GitHub Actions run page
 - **Daily CI run** that deploys the latest report to GitHub Pages, even when the check fails
 
@@ -99,7 +99,7 @@ All settings live in `config.yaml`. `--url`, `--max-pages`, `--max-depth`, `--ou
 | `max_depth` | `2` | Clicks away from the start page (start page = 0). Links on the last level are checked but not crawled. |
 | `delay_seconds` | `1` | Pause between requests to the site while crawling |
 | `timeout_seconds` | `10` | Timeout for each link check |
-| `retries` | `1` | Extra attempts for timeouts, connection errors, 429 and 5xx. Also how many times a page is reloaded to confirm problems. |
+| `retries` | `1` | Extra attempts for timeouts, connection errors, 429 and 5xx. Set to 0 to also skip re-checking problem pages after the crawl. |
 | `page_load_timeout_seconds` | `60` | Browser page load timeout (generous, because free hosting can take 30s to wake up) |
 | `max_workers` | `10` | Links checked in parallel |
 | `slow_page_ms` | `3000` | Pages whose load event takes longer than this are flagged |
@@ -136,7 +136,7 @@ flowchart LR
 ## Tests
 
 ```bash
-pytest                    # 69 unit tests, no network or browser, under a second
+pytest                    # 70 unit tests, no network or browser, a few seconds
 pytest -m integration     # real Chrome against the demo site's /broken_images page
 ```
 
@@ -146,7 +146,7 @@ Integration tests are excluded by default in `pytest.ini` because they need the 
 | --- | --- |
 | `tests/test_link_validator.py` | Mocked responses: 200, 301 → 200, 404, 500, timeout, connection error, SSL error, HEAD 405/403/501 → GET, retries, parallel validation |
 | `tests/test_urls.py` | Relative links, fragments, duplicates, `mailto:`/`tel:`/`javascript:`/`data:`, same-site vs external, ignore patterns |
-| `tests/test_crawler.py` | BFS order, depth and page limits, skipped non-HTML/404 pages, reload confirmation, 5xx page retry (fake browser) |
+| `tests/test_crawler.py` | BFS order, depth and page limits, skipped non-HTML/404 pages, re-checking problem pages after the crawl, 5xx page retry (fake browser) |
 | `tests/test_config.py` | CLI overrides YAML, `--no-fail-on-broken`, validation errors |
 | `tests/test_report.py` | `index.html` and `results.json` counts, HTML escaping, relative paths, screenshot pruning, job summary |
 | `tests/test_integration.py` | At least 2 broken images found on `/broken_images`, and the working image isn't flagged |
@@ -157,7 +157,7 @@ Integration tests are excluded by default in `pytest.ini` because they need the 
 - **Pre-check pages with `requests` before opening them in Chrome.** Selenium can't see HTTP status codes, and opening a 401 page, a PDF or a ZIP in the browser wastes time or triggers auth prompts and downloads. The pre-check result is reused, so those URLs aren't requested twice.
 - **HEAD first, GET as fallback.** HEAD skips the body. Some servers reject or mishandle it (403/405/501, dropped connections), so those are retried with a streaming GET that only reads the headers.
 - **Retry only what can recover.** Timeouts, connection errors, 429 and 5xx get one more attempt. A 404 or an SSL error won't fix itself, so it isn't retried.
-- **Confirm browser problems with a reload.** The demo host sometimes answers 503 after a 30s stall, which makes CSS, JS and images fail at random. A broken image or console error is only reported if it happens again on a second load. Real bugs reproduce; blips don't.
+- **Re-check problem pages after the crawl.** The demo host sometimes answers 503 after a 30s stall, especially while it warms up, which makes CSS, JS and images fail at random. Pages with broken images or console errors are loaded again once the crawl is done, minutes later, and only problems that happen both times are reported. Reloading straight away tended to land in the same bad patch. It's the same idea as re-running failed tests at the end of a suite.
 - **Group console errors.** Query strings are stripped from URLs inside messages, so the same failing tracker call shows up as one row listing every page it appeared on, not hundreds of rows.
 - **Screenshot every page, keep only the bad ones.** Whether a page links to something broken is only known after link validation, when the browser has already moved on. Taking the screenshot while the page is open is cheap; going back would cost a page load.
 - **Politeness.** A delay between page loads, a user agent that names the tool, and a cap on parallel link checks.
@@ -171,7 +171,7 @@ Integration tests are excluded by default in `pytest.ini` because they need the 
 - **Links that appear only after user interaction** (hover menus, infinite scroll, clicks), or inside iframes or shadow DOM, aren't collected.
 - **One browser, one page at a time**, so a 30-page crawl takes a few minutes. Link checks are the parallel part.
 - **Third-party noise.** A failing analytics or ad script counts as a console error until you ignore it.
-- **The reload used to confirm problems is partly served from the browser cache**, so a resource that failed once may not be requested again.
+- **The re-check load is partly served from the browser cache**, so a resource that failed once may not be requested again. A problem that only happens some of the time (a real race condition) can also be dropped. The trade-off favours fewer false alarms in a daily report.
 
 ## Future improvements
 

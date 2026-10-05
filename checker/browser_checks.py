@@ -165,9 +165,9 @@ def read_console_errors(driver: WebDriver) -> list[ConsoleError]:
 def confirm_problems(first: PageReport, second: PageReport) -> PageReport:
     """Keep only the broken images and console errors seen on both loads.
 
-    A real bug reproduces on a reload; a one-off network blip doesn't. Timing
-    and links come from the first load, because the reload is served partly
-    from the browser cache and would look faster than it really is.
+    A real bug reproduces on a second load; a one-off network blip doesn't.
+    Timing and links come from the first load, because the second load is
+    served partly from the browser cache and would look faster than it is.
     """
     first.broken_images = [img for img in first.broken_images if img in second.broken_images]
     first.console_errors = [err for err in first.console_errors if err in second.console_errors]

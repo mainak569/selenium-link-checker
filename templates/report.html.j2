@@ -230,7 +230,7 @@
     </table>
   {% endcall %}
 
-  {% call section("console-errors", "Console errors", s.console_errors, "SEVERE browser console entries, grouped by message" ~ (". Each one happened again on a reload." if r.config.retries else ".")) %}
+  {% call section("console-errors", "Console errors", s.console_errors, "SEVERE browser console entries, grouped by message" ~ (". Each one happened again when the page was re-checked after the crawl." if r.config.retries else ".")) %}
     <table>
       <thead><tr><th>Message</th><th>Source</th><th>Found on</th></tr></thead>
       <tbody>

@@ -107,6 +107,25 @@ def test_problems_must_reproduce_on_reload(monkeypatch):
     assert result.pages[0].console_errors == [ConsoleError("javascript", "real bug")]
 
 
+def test_problem_pages_are_rechecked_after_the_crawl_not_straight_away(monkeypatch):
+    order: list[str] = []
+
+    def fake_inspect(driver, url, *, depth, **_kwargs):
+        order.append(url)
+        path = url.removeprefix("https://site.test")
+        errors = [ConsoleError("javascript", "boom")] if path == "/" else []
+        return PageReport(url=url, depth=depth, http_status=200, raw_links=SITE.get(path, []),
+                          base_url=url, console_errors=errors)
+
+    monkeypatch.setattr(crawler_module, "inspect_page", fake_inspect)
+    monkeypatch.setattr(crawler_module.time, "sleep", lambda _s: None)
+    result = run(max_depth=1, max_pages=10, retries=1)
+    # The home page is loaded again only after every other page, and only it
+    # (the clean pages aren't reloaded).
+    assert order == [ROOT, "https://site.test/a", "https://site.test/b", ROOT]
+    assert result.pages[0].console_errors == [ConsoleError("javascript", "boom")]
+
+
 def test_server_error_page_is_loaded_again(monkeypatch):
     statuses = iter([503, 200])
 

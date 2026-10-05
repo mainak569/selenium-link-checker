@@ -220,6 +220,7 @@ class Crawler:
                     enqueued.add(link)
                     queue.append((link, depth + 1))
 
+        self._recheck_problem_pages(result.pages)
         log.info(
             "Crawl finished: %d pages loaded, %d unique URLs collected, %d same-domain URLs skipped",
             len(result.pages),
@@ -241,32 +242,44 @@ class Crawler:
         return check
 
     def _load_page(self, url: str, depth: int) -> PageReport:
-        """Open a page in the browser and double-check anything that looks wrong.
+        """Open a page in the browser, loading it again if the server answers 429/5xx.
 
-        Two kinds of flakiness show up in practice: the server answers the
-        browser with a 5xx although the pre-flight request got a 200, or a few
-        CSS/JS/image requests fail during a server hiccup. So, up to `retries`
-        extra loads:
-        - a 429/5xx document is simply loaded again, and
-        - broken images and console errors are only kept if they happen again
-          on a second load. Real bugs reproduce; one-off blips don't.
+        The pre-flight request can get a 200 while the browser's own request a
+        moment later hits a struggling server. The crawl needs this page's links,
+        so it is retried straight away (up to `retries` times).
         """
         page = self._inspect(url, depth)
         for _ in range(self.config.retries):
-            if page.http_status in RETRY_STATUSES:
-                log.warning("    browser got HTTP %s, loading again", page.http_status)
-                self._pause()
-                page = self._inspect(url, depth)
-            elif page.broken_images or page.console_errors:
-                found = len(page.broken_images) + len(page.console_errors)
-                self._pause()
-                page = confirm_problems(page, self._inspect(url, depth))
-                confirmed = len(page.broken_images) + len(page.console_errors)
-                log.info("    reloaded to confirm: %d of %d problem(s) reproduced", confirmed, found)
+            if page.http_status not in RETRY_STATUSES:
                 break
-            else:
-                break
+            log.warning("    browser got HTTP %s, loading again", page.http_status)
+            self._pause()
+            page = self._inspect(url, depth)
         return page
+
+    def _recheck_problem_pages(self, pages: list[PageReport]) -> None:
+        """Load pages with broken images or console errors once more; keep what happens again.
+
+        This runs after the crawl, minutes after the first load, so a server
+        hiccup during the first load has usually passed. (Reloading straight
+        away tends to land in the same bad patch: on the demo host, the first
+        page's CSS and JS often time out with 503s while the server warms up.)
+        Real bugs show up both times; one-off failures don't.
+        """
+        suspects = [page for page in pages if page.broken_images or page.console_errors]
+        if not suspects or not self.config.retries:
+            return
+        log.info("Re-checking %d page(s) with problems to rule out one-off failures", len(suspects))
+        for page in suspects:
+            self._pause()
+            second = self._inspect(page.url, page.depth)
+            if second.http_status in RETRY_STATUSES:
+                log.warning("    %s answered HTTP %s, keeping the first result", page.url, second.http_status)
+                continue
+            before = len(page.broken_images) + len(page.console_errors)
+            confirm_problems(page, second)
+            after = len(page.broken_images) + len(page.console_errors)
+            log.info("    %s: %d of %d problem(s) happened again", page.url, after, before)
 
     def _inspect(self, url: str, depth: int) -> PageReport:
         cfg = self.config
