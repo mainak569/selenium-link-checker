@@ -1,0 +1,15 @@
+# Default settings for selenium-link-checker.
+# Any of these can be overridden from the command line (see `python main.py --help`).
+
+start_url: https://the-internet.herokuapp.com
+max_pages: 30            # pages loaded in the browser
+max_depth: 2             # clicks away from start_url (start_url itself is depth 0)
+delay_seconds: 1         # politeness pause between browser page loads
+timeout_seconds: 10      # per-request timeout for link checks
+retries: 1               # extra attempts for timeouts, connection errors, 429 and 5xx
+page_load_timeout_seconds: 60   # browser page loads (generous: free hosts can cold-start slowly)
+max_workers: 10          # parallel link checks
+slow_page_ms: 3000       # pages whose load event takes longer than this are flagged
+fail_on_broken: false    # demo target has intentional bugs; set true for a real site
+ignore_patterns: []      # regexes; matching URLs are neither crawled nor checked
+user_agent: "Mozilla/5.0 (compatible; selenium-link-checker/1.0; +https://github.com/mainak569/selenium-link-checker)"

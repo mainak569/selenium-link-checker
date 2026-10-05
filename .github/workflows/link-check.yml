@@ -1,0 +1,75 @@
+name: Link check
+
+on:
+  schedule:
+    - cron: "30 3 * * *" # 03:30 UTC = 9:00 AM IST
+  workflow_dispatch:
+    inputs:
+      fail_on_broken:
+        description: "Fail the run when problems are found (overrides config.yaml)"
+        type: boolean
+        default: false
+  push:
+    branches: [main]
+
+permissions:
+  contents: read
+  pages: write
+  id-token: write
+
+# One run at a time. A new run waits for the current one instead of cancelling
+# it, so a Pages deployment is never cut off halfway.
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    outputs:
+      report_uploaded: ${{ steps.upload.outcome == 'success' }}
+    steps:
+      - name: Check out code
+        uses: actions/checkout@v7
+
+      - name: Set up Python
+        uses: actions/setup-python@v7
+        with:
+          python-version: "3.14"
+          cache: pip
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Run unit tests
+        run: pytest # integration tests are excluded in pytest.ini
+
+      - name: Run link checker
+        # Chrome is preinstalled on ubuntu-latest; Selenium Manager fetches the matching driver.
+        env:
+          FAIL_FLAG: ${{ inputs.fail_on_broken && '--fail-on-broken' || '' }}
+        run: python main.py $FAIL_FLAG
+
+      - name: Upload report
+        id: upload
+        # Runs even when the checker exited non-zero, so a failing run still publishes
+        # its report. Skipped only if no report was written (e.g. the unit tests failed).
+        if: ${{ !cancelled() && hashFiles('report/index.html') != '' }}
+        uses: actions/upload-pages-artifact@v5
+        with:
+          path: report/
+
+  deploy:
+    needs: check
+    # Deploy whenever a report was uploaded, even if "check" failed because problems
+    # were found. The failed "check" job still marks the whole run as failed.
+    if: ${{ !cancelled() && needs.check.outputs.report_uploaded == 'true' }}
+    runs-on: ubuntu-latest
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy to GitHub Pages
+        id: deployment
+        uses: actions/deploy-pages@v5

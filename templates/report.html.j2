@@ -1,0 +1,332 @@
+{#- Self-contained report: no external CSS, JS or fonts, so it works offline and on
+    GitHub Pages under any sub-path. Every link to a screenshot or results.json is relative. -#}
+{% set s = r.summary %}
+{% set tile_targets = {
+  "pages_crawled": "pages", "links_checked": "broken-links", "broken_links": "broken-links",
+  "broken_images": "broken-images", "redirects": "redirects", "console_errors": "console-errors",
+  "slow_pages": "slow-pages"} %}
+{% set warning_keys = ["redirects", "slow_pages"] %}
+
+{% macro url_link(url, full=false) -%}
+  <a class="url" href="{{ url }}" title="{{ url }}" target="_blank" rel="noopener noreferrer nofollow">{{ url if full else url|display_url }}</a>
+{%- endmacro %}
+
+{% macro shot(path) -%}
+  {% if path %}<a href="{{ path }}" target="_blank" rel="noopener">Screenshot</a>{% else %}<span class="none">None</span>{% endif %}
+{%- endmacro %}
+
+{% macro found_on(sources) -%}
+  {% if not sources %}<span class="none">Start URL</span>{% endif %}
+  <ul class="sources">
+  {% for src in sources[:3] %}
+    <li>{{ url_link(src.page) }}{% if src.screenshot %} <a class="shot" href="{{ src.screenshot }}" target="_blank" rel="noopener">Screenshot</a>{% endif %}</li>
+  {% endfor %}
+  </ul>
+  {% if sources|length > 3 %}
+  <details class="more"><summary>{{ sources|length - 3 }} more page{{ "" if sources|length == 4 else "s" }}</summary>
+    <ul class="sources">
+    {% for src in sources[3:] %}
+      <li>{{ url_link(src.page) }}{% if src.screenshot %} <a class="shot" href="{{ src.screenshot }}" target="_blank" rel="noopener">Screenshot</a>{% endif %}</li>
+    {% endfor %}
+    </ul>
+  </details>
+  {% endif %}
+{%- endmacro %}
+
+{% macro section(id, title, count, note) -%}
+  <section id="{{ id }}" aria-labelledby="{{ id }}-title">
+    <div class="section-head">
+      <h2 id="{{ id }}-title">{{ title }} <span class="count">{{ count }}</span></h2>
+      {% if note %}<p class="note">{{ note }}</p>{% endif %}
+    </div>
+    {% if count %}
+    <div class="table-wrap">{{ caller() }}</div>
+    {% else %}
+    <p class="empty">No issues found.</p>
+    {% endif %}
+  </section>
+{%- endmacro %}
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Link check {{ r.status }}: {{ r.target }}</title>
+<style>
+  :root {
+    --bg: #ffffff;
+    --surface: #f3f5fa;
+    --ink: #14213d;
+    --muted: #59627a;
+    --line: #d9dee8;
+    --link: #1a0dab;      /* classic hyperlink blue */
+    --visited: #681da8;   /* visited-link purple, used for redirects */
+    --fail: #c62828;
+    --fail-bg: #fdecec;
+    --warn: #9a5b00;
+    --warn-bg: #fff3dc;
+    --pass: #1e7b34;
+    --pass-bg: #e6f4ea;
+    --sans: system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    --mono: ui-monospace, "SF Mono", Menlo, Consolas, "Liberation Mono", monospace;
+    color-scheme: light dark;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #0e1726; --surface: #16223a; --ink: #e6eaf2; --muted: #9ba6bf; --line: #2b3a5a;
+      --link: #8ab4f8; --visited: #c58af9;
+      --fail: #ff8a80; --fail-bg: #3b1b22; --warn: #ffc56b; --warn-bg: #3a2b12; --pass: #7fd197; --pass-bg: #14301f;
+    }
+  }
+  * { box-sizing: border-box; }
+  html { -webkit-text-size-adjust: 100%; }
+  body {
+    margin: 0; background: var(--bg); color: var(--ink);
+    font: 16px/1.5 var(--sans);
+  }
+  a { color: var(--link); text-underline-offset: 2px; }
+  a:focus-visible, summary:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 2px; }
+  .page { max-width: 1180px; margin: 0 auto; padding: 32px 24px 48px; }
+
+  /* Header and verdict */
+  .target { margin: 0 0 20px; color: var(--muted); font-size: 0.95rem; }
+  .target a { font-family: var(--mono); font-size: 0.9rem; word-break: break-all; }
+  .verdict { display: flex; gap: 18px; align-items: flex-start; }
+  .badge {
+    flex: none; display: inline-block; margin-top: 4px; padding: 6px 14px; border-radius: 6px;
+    font-weight: 800; font-size: 1.05rem; letter-spacing: 0.06em; color: #fff;
+  }
+  .badge.fail { background: var(--fail); }
+  .badge.pass { background: var(--pass); }
+  @media (prefers-color-scheme: dark) { .badge { color: var(--bg); } }
+  h1 { margin: 0; font-size: 2rem; line-height: 1.2; font-weight: 700; max-width: 30ch; letter-spacing: -0.01em; }
+  .subline { margin: 10px 0 0; color: var(--muted); font-size: 1.05rem; }
+  .meta { display: flex; flex-wrap: wrap; gap: 8px 32px; margin: 24px 0 0; padding: 14px 0 0; border-top: 1px solid var(--line); }
+  .meta div { min-width: 0; }
+  .meta dt { color: var(--muted); font-size: 0.8rem; }
+  .meta dd { margin: 0; font-weight: 600; font-variant-numeric: tabular-nums; }
+
+  /* Summary tiles: each one jumps to its section */
+  .tiles { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); gap: 10px; margin: 28px 0 8px; padding: 0; list-style: none; }
+  .tile a {
+    display: block; height: 100%; padding: 14px 14px 12px; border: 1px solid var(--line); border-radius: 8px;
+    background: var(--surface); color: inherit; text-decoration: none;
+  }
+  .tile a:hover { border-color: var(--link); }
+  .tile .num { display: block; font-size: 1.9rem; font-weight: 700; line-height: 1.1; font-variant-numeric: tabular-nums; }
+  .tile .label { display: block; margin-top: 4px; color: var(--muted); font-size: 0.85rem; }
+  .tile.is-fail a { background: var(--fail-bg); border-color: color-mix(in srgb, var(--fail) 35%, transparent); }
+  .tile.is-fail .num { color: var(--fail); }
+  .tile.is-warn a { background: var(--warn-bg); border-color: color-mix(in srgb, var(--warn) 35%, transparent); }
+  .tile.is-warn .num { color: var(--warn); }
+
+  /* Sections and tables */
+  section { margin-top: 44px; }
+  .section-head { display: flex; flex-wrap: wrap; align-items: baseline; gap: 4px 16px; margin-bottom: 12px; }
+  h2 { margin: 0; font-size: 1.3rem; line-height: 1.3; }
+  h2 .count {
+    display: inline-block; min-width: 1.8em; margin-left: 6px; padding: 1px 8px; border-radius: 999px;
+    background: var(--surface); border: 1px solid var(--line); font-size: 0.85rem; text-align: center;
+    font-variant-numeric: tabular-nums; vertical-align: 2px;
+  }
+  .note { margin: 0; color: var(--muted); font-size: 0.9rem; }
+  .empty { margin: 0; padding: 14px 16px; border: 1px dashed var(--line); border-radius: 8px; color: var(--pass); }
+  .table-wrap { overflow-x: auto; border: 1px solid var(--line); border-radius: 8px; }
+  table { width: 100%; border-collapse: collapse; font-size: 0.92rem; }
+  th, td { padding: 10px 14px; text-align: left; vertical-align: top; border-bottom: 1px solid var(--line); }
+  tbody tr:last-child td { border-bottom: 0; }
+  th { background: var(--surface); color: var(--muted); font-weight: 600; font-size: 0.82rem; white-space: nowrap; }
+  td.num, th.num { text-align: right; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .url { font-family: var(--mono); font-size: 0.85rem; word-break: break-all; }
+  .code { font-family: var(--mono); font-size: 0.85rem; white-space: pre-wrap; word-break: break-word; min-width: 18rem; display: block; }
+  .status {
+    display: inline-block; padding: 2px 8px; border-radius: 4px; font-family: var(--mono); font-size: 0.82rem;
+    font-weight: 700; white-space: nowrap; background: var(--fail-bg); color: var(--fail);
+  }
+  .status.warn { background: var(--warn-bg); color: var(--warn); }
+  .status.redirect { background: color-mix(in srgb, var(--visited) 12%, transparent); color: var(--visited); }
+  .tag { display: inline-block; margin-top: 4px; color: var(--muted); font-size: 0.8rem; }
+  .sources { margin: 0; padding: 0; list-style: none; min-width: 13rem; }
+  .sources li + li { margin-top: 4px; }
+  .shot { font-size: 0.82rem; white-space: nowrap; }
+  .none { color: var(--muted); }
+  details.more { margin-top: 4px; }
+  details.more summary { cursor: pointer; color: var(--link); font-size: 0.85rem; }
+  details.block { margin-top: 44px; }
+  details.block > summary { cursor: pointer; font-size: 1.15rem; font-weight: 700; }
+  details.block > .table-wrap { margin-top: 12px; }
+  .flag-slow { color: var(--warn); font-weight: 600; }
+  .flag-bad { color: var(--fail); font-weight: 600; }
+
+  footer { margin-top: 56px; padding-top: 16px; border-top: 1px solid var(--line); color: var(--muted); font-size: 0.85rem; }
+  footer p { margin: 0 0 6px; }
+
+  @media (max-width: 960px) { .tiles { grid-template-columns: repeat(4, minmax(0, 1fr)); } }
+  @media (max-width: 600px) {
+    .page { padding: 20px 16px 40px; }
+    .verdict { flex-direction: column; gap: 10px; }
+    h1 { font-size: 1.45rem; }
+    .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+    .tile .num { font-size: 1.5rem; }
+    th, td { padding: 8px 10px; }
+    .sources { min-width: 9rem; }
+  }
+</style>
+</head>
+<body>
+<main class="page">
+  <header>
+    <p class="target">Link check report for {{ url_link(r.target, full=true) }}</p>
+    <div class="verdict">
+      <span class="badge {{ r.status|lower }}" aria-label="Overall result: {{ r.status }}">{{ r.status }}</span>
+      <div>
+        <h1>{{ headline }}</h1>
+        {% if subline %}<p class="subline">{{ subline }}</p>{% endif %}
+      </div>
+    </div>
+    <dl class="meta">
+      <div><dt>Run (UTC)</dt><dd>{{ r.run_time_utc }}</dd></div>
+      <div><dt>Run (IST)</dt><dd>{{ r.run_time_ist }}</dd></div>
+      <div><dt>Duration</dt><dd>{{ r.duration }}</dd></div>
+      <div><dt>Crawl limits</dt><dd>{{ r.config.max_pages }} pages, depth {{ r.config.max_depth }}</dd></div>
+    </dl>
+  </header>
+
+  <ul class="tiles" aria-label="Summary">
+  {% for key, label in labels.items() %}
+    {% set state = "is-fail" if key in failing and s[key] else ("is-warn" if key in warning_keys and s[key] else "") %}
+    <li class="tile {{ state }}"><a href="#{{ tile_targets[key] }}"><span class="num">{{ s[key] }}</span><span class="label">{{ label }}</span></a></li>
+  {% endfor %}
+  </ul>
+
+  {% call section("broken-links", "Broken links", s.broken_links, "4xx/5xx responses, timeouts, SSL and connection errors.") %}
+    <table>
+      <thead><tr><th>URL</th><th>Result</th><th>Found on</th></tr></thead>
+      <tbody>
+      {% for row in r.broken_links %}
+        <tr>
+          <td>{{ url_link(row.url) }}<br><span class="tag">{{ "Internal" if row.internal else "External" }} {{ row.type }}{% if row.redirect_chain %}, redirected to {{ row.final_url }}{% endif %}</span></td>
+          <td><span class="status">{{ row.result }}</span></td>
+          <td>{{ found_on(row.found_on) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endcall %}
+
+  {% call section("broken-images", "Broken images", s.broken_images, "Images the browser finished loading but could not draw (naturalWidth is 0).") %}
+    <table>
+      <thead><tr><th>Page</th><th>Image</th><th>HTTP status</th><th>Screenshot</th></tr></thead>
+      <tbody>
+      {% for row in r.broken_images %}
+        <tr>
+          <td>{{ url_link(row.page) }}</td>
+          <td>{{ url_link(row.image_url) }}</td>
+          <td><span class="status{{ ' warn' if row.http_status == '200' }}">{{ row.http_status }}</span></td>
+          <td>{{ shot(row.screenshot) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endcall %}
+
+  {% call section("console-errors", "Console errors", s.console_errors, "SEVERE browser console entries, grouped by message" ~ (". Each one happened again on a reload." if r.config.retries else ".")) %}
+    <table>
+      <thead><tr><th>Message</th><th>Source</th><th>Found on</th></tr></thead>
+      <tbody>
+      {% for row in r.console_errors %}
+        <tr>
+          <td><span class="code">{{ row.message }}</span></td>
+          <td>{{ row.source }}</td>
+          <td>{{ found_on(row.found_on) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endcall %}
+
+  {% call section("redirects", "Redirects", s.redirects, "Working links that redirect first. Updating them saves a round trip.") %}
+    <table>
+      <thead><tr><th>URL</th><th>Status</th><th>Final URL</th><th>Found on</th></tr></thead>
+      <tbody>
+      {% for row in r.redirects %}
+        <tr>
+          <td>{{ url_link(row.url) }}</td>
+          <td><span class="status redirect">{{ row.redirect_chain|join(" → ") }} → {{ row.final_status }}</span></td>
+          <td>{{ url_link(row.final_url) }}</td>
+          <td>{{ found_on(row.found_on) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endcall %}
+
+  {% call section("slow-pages", "Slow pages", s.slow_pages, "Load event took longer than " ~ "{:,}".format(r.config.slow_page_ms) ~ " ms (Navigation Timing API).") %}
+    <table>
+      <thead><tr><th>Page</th><th class="num">Load time</th><th>Screenshot</th></tr></thead>
+      <tbody>
+      {% for row in r.slow_pages %}
+        <tr>
+          <td>{{ url_link(row.page) }}</td>
+          <td class="num"><span class="status warn">{{ "{:,}".format(row.load_time_ms) }} ms</span></td>
+          <td>{{ shot(row.screenshot) }}</td>
+        </tr>
+      {% endfor %}
+      </tbody>
+    </table>
+  {% endcall %}
+
+  <details class="block" id="pages">
+    <summary>All crawled pages ({{ r.pages|length }})</summary>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>Page</th><th class="num">HTTP</th><th class="num">Depth</th><th class="num">Load time</th><th class="num">Links</th><th class="num">Images</th><th>Issues</th></tr></thead>
+        <tbody>
+        {% for p in r.pages %}
+          <tr>
+            <td>{{ url_link(p.url) }}{% if p.title %}<br><span class="tag">{{ p.title }}</span>{% endif %}</td>
+            <td class="num{{ ' flag-bad' if p.http_status and p.http_status >= 400 }}">{{ p.http_status or "n/a" }}</td>
+            <td class="num">{{ p.depth }}</td>
+            <td class="num{{ ' flag-slow' if p.slow }}">{{ "{:,}".format(p.load_time_ms) ~ " ms" if p.load_time_ms is not none else "n/a" }}</td>
+            <td class="num">{{ p.links }}</td>
+            <td class="num">{{ p.images }}</td>
+            <td>
+              {% set issues = [] %}
+              {% if p.broken_images %}{% set _ = issues.append(p.broken_images ~ " broken image" ~ ("" if p.broken_images == 1 else "s")) %}{% endif %}
+              {% if p.console_errors %}{% set _ = issues.append(p.console_errors ~ " console error" ~ ("" if p.console_errors == 1 else "s")) %}{% endif %}
+              {% if p.slow %}{% set _ = issues.append("slow") %}{% endif %}
+              {% if issues %}<span class="flag-bad">{{ issues|join(", ") }}</span>{% else %}<span class="none">None</span>{% endif %}
+              {% if p.screenshot %}<br>{{ shot(p.screenshot) }}{% endif %}
+            </td>
+          </tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+
+  {% if r.not_crawled %}
+  <details class="block" id="not-crawled">
+    <summary>Same-site links not opened in the browser ({{ r.not_crawled|length }})</summary>
+    <div class="table-wrap">
+      <table>
+        <thead><tr><th>URL</th><th>Reason</th></tr></thead>
+        <tbody>
+        {% for row in r.not_crawled %}
+          <tr><td>{{ url_link(row.url) }}</td><td>{{ row.reason }}</td></tr>
+        {% endfor %}
+        </tbody>
+      </table>
+    </div>
+  </details>
+  {% endif %}
+
+  <footer>
+    <p>Generated by selenium-link-checker {{ r.version }}. Raw data: <a href="results.json">results.json</a>.</p>
+    <p>Settings: {{ r.config.delay_seconds }}s between page loads, {{ r.config.timeout_seconds }}s link timeout,
+      {{ r.config.retries }} retr{{ "y" if r.config.retries == 1 else "ies" }}, {{ r.config.max_workers }} parallel checks,
+      slow page threshold {{ "{:,}".format(r.config.slow_page_ms) }} ms{% if r.config.ignore_patterns %}, ignoring {{ r.config.ignore_patterns|join(", ") }}{% endif %}.</p>
+  </footer>
+</main>
+</body>
+</html>
