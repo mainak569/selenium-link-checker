@@ -185,14 +185,7 @@ class Crawler:
 
             # Selenium can't see HTTP status codes, so ask with requests first.
             # This keeps 404s, auth prompts and file downloads out of the browser.
-            check = page_checker(url)
-            if depth == 0:
-                for _ in range(START_PAGE_EXTRA_ATTEMPTS):
-                    if not is_transient(check):
-                        break
-                    log.warning("Start page answered %s, trying again in %gs", check.describe(), START_PAGE_BACKOFF_SECONDS)
-                    time.sleep(START_PAGE_BACKOFF_SECONDS)
-                    check = page_checker(url)
+            check = self._precheck(url, depth, page_checker)
             result.page_checks[url] = check
             reason = self._skip_reason(check, start)
             if reason:
@@ -234,6 +227,18 @@ class Crawler:
             len(result.skipped),
         )
         return result
+
+    @staticmethod
+    def _precheck(url: str, depth: int, page_checker: Callable[[str], LinkResult]) -> LinkResult:
+        """HTTP check before opening a page. The start page gets extra attempts."""
+        check = page_checker(url)
+        attempts_left = START_PAGE_EXTRA_ATTEMPTS if depth == 0 else 0
+        while attempts_left and is_transient(check):
+            log.warning("Start page answered %s, trying again in %gs", check.describe(), START_PAGE_BACKOFF_SECONDS)
+            time.sleep(START_PAGE_BACKOFF_SECONDS)
+            check = page_checker(url)
+            attempts_left -= 1
+        return check
 
     def _load_page(self, url: str, depth: int) -> PageReport:
         """Open a page in the browser and double-check anything that looks wrong.
