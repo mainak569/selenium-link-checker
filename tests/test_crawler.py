@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import pytest
+from selenium.common.exceptions import WebDriverException
 
 from checker import crawler as crawler_module
 from checker.browser_checks import ConsoleError, PageReport
@@ -20,6 +21,16 @@ SITE = {
     "/a1": ["/deep"],
     "/b1": [],
 }
+
+
+class FakeDriver:
+    """Stands in for a WebDriver; inspect_page is replaced in these tests."""
+
+    def __init__(self) -> None:
+        self.quit_called = False
+
+    def quit(self) -> None:
+        self.quit_called = True
 
 
 def fake_page_checker(url: str) -> LinkResult:
@@ -48,7 +59,7 @@ def loaded(monkeypatch) -> list[str]:
 
 def run(**overrides) -> crawler_module.CrawlResult:
     config = Config(start_url=ROOT, delay_seconds=0, **overrides)
-    return Crawler(driver=None, config=config, page_checker=fake_page_checker).crawl()
+    return Crawler(config, driver_factory=FakeDriver, page_checker=fake_page_checker).crawl()
 
 
 def test_crawls_breadth_first_within_depth(loaded):
@@ -136,3 +147,31 @@ def test_server_error_page_is_loaded_again(monkeypatch):
     monkeypatch.setattr(crawler_module.time, "sleep", lambda _s: None)
     result = run(max_depth=0, max_pages=1, retries=1)
     assert result.pages[0].http_status == 200
+
+
+def test_stuck_browser_is_replaced_and_the_page_retried(monkeypatch):
+    drivers: list[FakeDriver] = []
+
+    def factory() -> FakeDriver:
+        drivers.append(FakeDriver())
+        return drivers[-1]
+
+    calls = iter([WebDriverException("timeout: Timed out receiving message from renderer: 10.000"), None])
+
+    def fake_inspect(driver, url, *, depth, **_kwargs):
+        error = next(calls)
+        if error:
+            raise error
+        return PageReport(url=url, depth=depth, http_status=200)
+
+    monkeypatch.setattr(crawler_module, "inspect_page", fake_inspect)
+    monkeypatch.setattr(crawler_module.time, "sleep", lambda _s: None)
+    crawler = Crawler(Config(start_url=ROOT, delay_seconds=0, max_depth=0, max_pages=1),
+                      driver_factory=factory, page_checker=fake_page_checker)
+    result = crawler.crawl()
+
+    assert len(drivers) == 2 and drivers[0].quit_called  # old browser quit, new one started
+    assert result.pages[0].http_status == 200  # the retry on the new browser worked
+    assert result.pages[0].console_errors == []
+    crawler.close()
+    assert drivers[1].quit_called

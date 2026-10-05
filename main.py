@@ -17,6 +17,7 @@ import argparse
 import logging
 import sys
 from datetime import datetime, timezone
+from functools import partial
 from pathlib import Path
 
 from selenium.common.exceptions import WebDriverException
@@ -76,22 +77,23 @@ def run(config: Config) -> int:
         config.delay_seconds,
     )
 
-    driver = None
+    # The crawler starts Chrome itself, and starts a fresh one if it gets stuck.
+    driver_factory = partial(
+        create_driver,
+        headless=not config.headed,
+        user_agent=config.user_agent,
+        page_load_timeout=config.page_load_timeout_seconds,
+    )
+    crawler = Crawler(config, driver_factory=driver_factory, screenshot_dir=screenshot_dir)
     try:
-        driver = create_driver(
-            headless=not config.headed,
-            user_agent=config.user_agent,
-            page_load_timeout=config.page_load_timeout_seconds,
-        )
-        crawl = Crawler(driver, config, screenshot_dir=screenshot_dir).crawl()
-    except WebDriverException as exc:
+        crawl = crawler.crawl()
+    except WebDriverException as exc:  # e.g. Chrome isn't installed or can't start
         log.error("Browser error: %s", exc.msg or exc)
         return EXIT_ERROR
     finally:
-        # Always release Chrome, even after an error or Ctrl+C, so no orphaned
+        # Always quit Chrome, even after an error or Ctrl+C, so no orphaned
         # browser processes are left behind.
-        if driver is not None:
-            driver.quit()
+        crawler.close()
 
     # Pages checked during the crawl are passed as `known` so they aren't requested twice.
     link_results = validate_links(

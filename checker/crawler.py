@@ -12,9 +12,10 @@ from functools import partial
 from pathlib import Path
 from urllib.parse import urldefrag, urljoin, urlsplit, urlunsplit
 
+from selenium.common.exceptions import WebDriverException
 from selenium.webdriver.remote.webdriver import WebDriver
 
-from checker.browser_checks import PageReport, confirm_problems, inspect_page
+from checker.browser_checks import ConsoleError, PageReport, confirm_problems, inspect_page
 from checker.config import Config
 from checker.link_validator import (
     RETRY_BACKOFF_SECONDS,
@@ -128,15 +129,21 @@ class CrawlResult:
 
 
 class Crawler:
+    """Crawls one site. Owns the browser so it can replace one that gets stuck.
+
+    Call close() when done (main.py does it in a finally block).
+    """
+
     def __init__(
         self,
-        driver: WebDriver,
         config: Config,
         *,
+        driver_factory: Callable[[], WebDriver],
         screenshot_dir: Path | None = None,
         page_checker: Callable[[str], LinkResult] | None = None,
     ) -> None:
-        self.driver = driver
+        self.driver_factory = driver_factory
+        self.driver: WebDriver | None = None
         self.config = config
         self.screenshot_dir = screenshot_dir
         self.patterns = compile_patterns(config.ignore_patterns)
@@ -160,11 +167,28 @@ class Crawler:
                 retries=self.config.retries,
             )
 
+        if self.driver is None:
+            self.driver = self.driver_factory()
         try:
             return self._crawl(start, page_checker)
         finally:
             if session is not None:
                 session.close()
+
+    def close(self) -> None:
+        """Quit the browser (whichever one is current after any restarts)."""
+        if self.driver is not None:
+            try:
+                self.driver.quit()
+            finally:
+                self.driver = None
+
+    def _restart_browser(self) -> None:
+        try:
+            self.close()
+        except WebDriverException:
+            pass  # the old browser is already broken; we only want it gone
+        self.driver = self.driver_factory()
 
     def _crawl(self, start: str, page_checker: Callable[[str], LinkResult]) -> CrawlResult:
         cfg = self.config
@@ -242,17 +266,21 @@ class Crawler:
         return check
 
     def _load_page(self, url: str, depth: int) -> PageReport:
-        """Open a page in the browser, loading it again if the server answers 429/5xx.
+        """Open a page in the browser, loading it again if the first try failed.
 
         The pre-flight request can get a 200 while the browser's own request a
-        moment later hits a struggling server. The crawl needs this page's links,
-        so it is retried straight away (up to `retries` times).
+        moment later hits a struggling server (a 429/5xx, or a load that never
+        finishes). The crawl needs this page's links, so it is retried straight
+        away (up to `retries` times).
         """
         page = self._inspect(url, depth)
         for _ in range(self.config.retries):
-            if page.http_status not in RETRY_STATUSES:
+            if page.http_status in RETRY_STATUSES:
+                log.warning("    browser got HTTP %s, loading again", page.http_status)
+            elif page.load_failed:
+                log.warning("    page did not load, trying once more")
+            else:
                 break
-            log.warning("    browser got HTTP %s, loading again", page.http_status)
             self._pause()
             page = self._inspect(url, depth)
         return page
@@ -283,14 +311,25 @@ class Crawler:
 
     def _inspect(self, url: str, depth: int) -> PageReport:
         cfg = self.config
-        page = inspect_page(
-            self.driver,
-            url,
-            depth=depth,
-            slow_page_ms=cfg.slow_page_ms,
-            page_load_timeout=cfg.page_load_timeout_seconds,
-            screenshot_dir=self.screenshot_dir,
-        )
+        try:
+            page = inspect_page(
+                self.driver,
+                url,
+                depth=depth,
+                slow_page_ms=cfg.slow_page_ms,
+                page_load_timeout=cfg.page_load_timeout_seconds,
+                screenshot_dir=self.screenshot_dir,
+            )
+        except WebDriverException as exc:
+            # The browser itself stopped responding (e.g. chromedriver's "Timed out
+            # receiving message from renderer" after a hung page load). Record it on
+            # this page and start a fresh browser so one bad page can't end the run.
+            reason = (exc.msg or type(exc).__name__).splitlines()[0]
+            log.warning("    browser stopped responding (%s); starting a new one", reason)
+            self._restart_browser()
+            return PageReport(url=url, depth=depth, console_errors=[
+                ConsoleError("page-load", f"Browser stopped responding: {reason}")
+            ])
         # Console errors that mention an ignored URL (e.g. a third-party tracker) are dropped too.
         page.console_errors = [err for err in page.console_errors if not is_ignored(err.message, self.patterns)]
         return page

@@ -100,6 +100,10 @@ class PageReport:
     screenshot: str | None = None  # path relative to the report folder
 
     @property
+    def load_failed(self) -> bool:
+        return any(error.source == "page-load" for error in self.console_errors)
+
+    @property
     def has_browser_problem(self) -> bool:
         return bool(self.broken_images or self.console_errors or self.is_slow)
 

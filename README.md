@@ -136,7 +136,7 @@ flowchart LR
 ## Tests
 
 ```bash
-pytest                    # 70 unit tests, no network or browser, a few seconds
+pytest                    # 71 unit tests, no network or browser, a few seconds
 pytest -m integration     # real Chrome against the demo site's /broken_images page
 ```
 
@@ -146,7 +146,7 @@ Integration tests are excluded by default in `pytest.ini` because they need the 
 | --- | --- |
 | `tests/test_link_validator.py` | Mocked responses: 200, 301 → 200, 404, 500, timeout, connection error, SSL error, HEAD 405/403/501 → GET, retries, parallel validation |
 | `tests/test_urls.py` | Relative links, fragments, duplicates, `mailto:`/`tel:`/`javascript:`/`data:`, same-site vs external, ignore patterns |
-| `tests/test_crawler.py` | BFS order, depth and page limits, skipped non-HTML/404 pages, re-checking problem pages after the crawl, 5xx page retry (fake browser) |
+| `tests/test_crawler.py` | BFS order, depth and page limits, skipped non-HTML/404 pages, re-checking problem pages after the crawl, 5xx page retry, replacing a stuck browser (fake browser) |
 | `tests/test_config.py` | CLI overrides YAML, `--no-fail-on-broken`, validation errors |
 | `tests/test_report.py` | `index.html` and `results.json` counts, HTML escaping, relative paths, screenshot pruning, job summary |
 | `tests/test_integration.py` | At least 2 broken images found on `/broken_images`, and the working image isn't flagged |
@@ -158,6 +158,7 @@ Integration tests are excluded by default in `pytest.ini` because they need the 
 - **HEAD first, GET as fallback.** HEAD skips the body. Some servers reject or mishandle it (403/405/501, dropped connections), so those are retried with a streaming GET that only reads the headers.
 - **Retry only what can recover.** Timeouts, connection errors, 429 and 5xx get one more attempt. A 404 or an SSL error won't fix itself, so it isn't retried.
 - **Re-check problem pages after the crawl.** The demo host sometimes answers 503 after a 30s stall, especially while it warms up, which makes CSS, JS and images fail at random. Pages with broken images or console errors are loaded again once the crawl is done, minutes later, and only problems that happen both times are reported. Reloading straight away tended to land in the same bad patch. It's the same idea as re-running failed tests at the end of a suite.
+- **One stuck page can't end the run.** If Chrome stops responding (chromedriver's "Timed out receiving message from renderer" after a hung load), the page is recorded as failed, the crawler quits that browser, starts a fresh one and carries on. `main.py` still quits whichever browser is current in a `finally` block.
 - **Group console errors.** Query strings are stripped from URLs inside messages, so the same failing tracker call shows up as one row listing every page it appeared on, not hundreds of rows.
 - **Screenshot every page, keep only the bad ones.** Whether a page links to something broken is only known after link validation, when the browser has already moved on. Taking the screenshot while the page is open is cheap; going back would cost a page load.
 - **Politeness.** A delay between page loads, a user agent that names the tool, and a cap on parallel link checks.
