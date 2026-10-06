@@ -20,11 +20,19 @@ Crawls a site in headless Chrome to find broken links, broken images, JavaScript
 [![GitHub Pages](https://img.shields.io/badge/GitHub%20Pages-Live-222222?logo=githubpages&logoColor=white)](https://mainak569.github.io/selenium-link-checker/)
 [![Link check](https://github.com/mainak569/selenium-link-checker/actions/workflows/link-check.yml/badge.svg)](https://github.com/mainak569/selenium-link-checker/actions/workflows/link-check.yml)
 
-[**Live Report**](https://mainak569.github.io/selenium-link-checker/) · [Features](#features) · [Tech Stack](#tech-stack) · [Getting Started](#getting-started) · [How It Works](#how-it-works) · [Configuration](#configuration) · [CI/CD](#cicd) · [Testing](#testing)
+[**Live Report**](https://mainak569.github.io/selenium-link-checker/) · [Demo Video](#demo-video) · [Features](#features) · [Tech Stack](#tech-stack) · [Getting Started](#getting-started) · [How It Works](#how-it-works) · [Configuration](#configuration) · [CI/CD](#cicd) · [Testing](#testing)
 
 </div>
 
 ---
+
+## Demo Video
+
+A two-minute walkthrough: crawling, browser checks, link validation, the safeguards for a flaky site, report generation, CI/CD and the live report. Every number and screenshot in it comes from a real run.
+
+https://github.com/user-attachments/assets/2ba87668-4356-45db-80af-f66ffdc597b1
+
+## Report Preview
 
 <picture>
   <source media="(prefers-color-scheme: dark)" srcset="docs/report-screenshot-dark.png">

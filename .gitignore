@@ -4,3 +4,4 @@ __pycache__/
 report/
 *.pyc
 .DS_Store
+video/
