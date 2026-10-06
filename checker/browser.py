@@ -13,6 +13,22 @@ log = logging.getLogger(__name__)
 
 WINDOW_SIZE = (1366, 900)
 
+# alert()/confirm()/prompt() pop-ups block the page and every WebDriver command
+# until someone clicks them. This runs before any page script and replaces them
+# with versions that log the message as a console error (so it ends up in the
+# report) and answer like the user pressed "Cancel", the least risky answer
+# (an "OK" to "Delete this?" could change something).
+DIALOG_GUARD_JS = """
+(() => {
+  for (const name of ['alert', 'confirm', 'prompt']) {
+    window[name] = function (message) {
+      console.error(`JavaScript ${name}() opened: ${message}`);
+      return name === 'confirm' ? false : null;
+    };
+  }
+})();
+"""
+
 
 def create_driver(
     *,
@@ -51,5 +67,7 @@ def create_driver(
     log.info("Starting Chrome (%s)", "headless" if headless else "headed")
     driver = webdriver.Chrome(options=options)
     driver.set_page_load_timeout(page_load_timeout)
+    # Chrome DevTools: run DIALOG_GUARD_JS in every page and frame before its own scripts.
+    driver.execute_cdp_cmd("Page.addScriptToEvaluateOnNewDocument", {"source": DIALOG_GUARD_JS})
     log.info("Chrome %s ready", driver.capabilities.get("browserVersion", "?"))
     return driver

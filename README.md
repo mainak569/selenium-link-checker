@@ -31,7 +31,7 @@ Crawls a site in headless Chrome to find broken links, broken images, JavaScript
   <img alt="The HTML report: overall verdict, summary tiles and the broken links table" src="docs/report-screenshot.png">
 </picture>
 
-The default target is [the-internet.herokuapp.com](https://the-internet.herokuapp.com), a practice site that is broken on purpose, so the report always has real findings. A typical run checks about 350 links across 30 pages in around two minutes. The report says FAIL because of those planted bugs; the workflow itself stays green unless `fail_on_broken` is turned on.
+The default target is [the-internet.herokuapp.com](https://the-internet.herokuapp.com), a practice site that is broken on purpose, so the report always has real findings. A typical run checks a few hundred links across 30 pages in a few minutes. The report says FAIL because of those planted bugs; the workflow itself stays green unless `fail_on_broken` is turned on.
 
 ## Features
 
@@ -56,6 +56,7 @@ The default target is [the-internet.herokuapp.com](https://the-internet.herokuap
 - Timeouts, connection errors, 429 and 5xx are retried; 404s aren't.
 - Pages with problems are loaded again after the crawl, and only problems that happen both times are reported.
 - If Chrome gets stuck on a page, a fresh browser takes over and the crawl carries on.
+- `alert()`, `confirm()` and `prompt()` pop-ups are logged instead of shown, so they can't freeze the crawl.
 
 ### Why Selenium and not just `requests`?
 
@@ -206,6 +207,7 @@ Integration tests are excluded by default in `pytest.ini` because they need the 
 - **Retry only what can recover.** Timeouts, connection errors, 429 and 5xx get one more attempt. A 404 or an SSL error won't fix itself, so it isn't retried.
 - **Re-check problem pages after the crawl.** The demo host sometimes answers 503 after a 30s stall, especially while it warms up, which makes CSS, JS and images fail at random. Pages with broken images or console errors are loaded again once the crawl is done, minutes later, and only problems that happen both times are reported. Reloading straight away tended to land in the same bad patch. It's the same idea as re-running failed tests at the end of a suite.
 - **One stuck page can't end the run.** If Chrome stops responding (chromedriver's "Timed out receiving message from renderer" after a hung load), the page is recorded as failed, the crawler quits that browser, starts a fresh one and carries on. `main.py` still quits whichever browser is current in a `finally` block.
+- **Pop-ups can't freeze the crawl.** An `alert()` blocks the page and every WebDriver command until someone clicks it. Before any page script runs, `alert`, `confirm` and `prompt` are replaced (through Chrome DevTools' `Page.addScriptToEvaluateOnNewDocument`) with versions that log the message as a console error and answer "Cancel", the least risky answer. On the demo site this surfaced an `alert(document.domain)` injected through an uploaded file name on `/download`.
 - **Group console errors.** Query strings are stripped from URLs inside messages, so the same failing tracker call shows up as one row listing every page it appeared on, not hundreds of rows.
 - **Screenshot every page, keep only the bad ones.** Whether a page links to something broken is only known after link validation, when the browser has already moved on. Taking the screenshot while the page is open is cheap; going back would cost a page load.
 - **Politeness.** A delay between page loads, a user agent that names the tool, and a cap on parallel link checks.

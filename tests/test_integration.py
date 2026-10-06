@@ -39,3 +39,13 @@ def test_broken_images_are_detected_in_a_real_browser(driver):
     # The working image on the same page must not be flagged (no false positive).
     assert not any("avatar-blank.jpg" in src for src in page.broken_images)
     assert page.load_time_ms is not None and page.load_time_ms > 0
+
+
+def test_alert_on_page_load_is_reported_without_blocking_the_crawl(driver):
+    # A page that pops an alert while loading, like an injected
+    # <img src=x onerror=alert(document.domain)>. No network needed.
+    html = "<a href='https://example.com/next'>next</a><script>alert('hello from the page')</script>"
+    page = inspect_page(driver, "data:text/html," + html, depth=0, slow_page_ms=3000, page_load_timeout=30)
+
+    assert page.raw_links == ["https://example.com/next"]  # inspection carried on
+    assert any("alert() opened: hello from the page" in error.message for error in page.console_errors)
