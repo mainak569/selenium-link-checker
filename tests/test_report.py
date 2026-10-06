@@ -100,6 +100,8 @@ def test_report_is_self_contained_with_relative_links(report_dir):
     crawl, links = make_crawl(report_dir)
     write_report(build_results(Config(start_url=SITE), crawl, links, STARTED, FINISHED), report_dir)
     html = (report_dir / "index.html").read_text()
+    # The "Pages crawled" tile links to #pages, so that must be an open section, not a collapsed <details>.
+    assert '<a href="#pages">' in html and '<section id="pages"' in html
     assert 'href="screenshots/gallery.png"' in html
     assert 'href="results.json"' in html
     assert "<link " not in html and "<script" not in html  # no external CSS or JS

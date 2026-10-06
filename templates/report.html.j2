@@ -276,8 +276,11 @@
     </table>
   {% endcall %}
 
-  <details class="block" id="pages">
-    <summary>All crawled pages ({{ r.pages|length }})</summary>
+  <section id="pages" aria-labelledby="pages-title">
+    <div class="section-head">
+      <h2 id="pages-title">All crawled pages <span class="count">{{ r.pages|length }}</span></h2>
+      <p class="note">Every page opened in the browser, in crawl order.</p>
+    </div>
     <div class="table-wrap">
       <table>
         <thead><tr><th>Page</th><th class="num">HTTP</th><th class="num">Depth</th><th class="num">Load time</th><th class="num">Links</th><th class="num">Images</th><th>Issues</th></tr></thead>
@@ -303,7 +306,7 @@
         </tbody>
       </table>
     </div>
-  </details>
+  </section>
 
   {% if r.not_crawled %}
   <details class="block" id="not-crawled">
