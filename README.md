@@ -89,7 +89,7 @@ A plain HTTP client only sees the server's response. Several real problems only 
 | **requests 2.34** | Status codes and redirects, HEAD → GET fallback, parallel checks with a thread pool |
 | **Jinja2 3.1** | Rendering the HTML report, with autoescaping on |
 | **PyYAML 6.0** | Reading `config.yaml` |
-| **pytest 9.1** | 71 unit tests and 1 integration test |
+| **pytest 9.1** | 71 unit tests and 2 integration tests |
 | **GitHub Actions** | Daily schedule, running the tests and the checker |
 | **GitHub Pages** | Hosting the latest report |
 
@@ -193,7 +193,7 @@ flowchart LR
 
 ```bash
 pytest                    # 71 unit tests, no network or browser, a few seconds
-pytest -m integration     # real Chrome against the demo site's /broken_images page
+pytest -m integration     # real Chrome: the demo site's /broken_images page, and an alert() pop-up
 ```
 
 Integration tests are excluded by default in `pytest.ini` because they need the network and a local Chrome. CI runs the unit tests before every check.
@@ -205,7 +205,7 @@ Integration tests are excluded by default in `pytest.ini` because they need the 
 | `tests/test_crawler.py` | BFS order, depth and page limits, skipped non-HTML/404 pages, re-checking problem pages after the crawl, 5xx page retry, replacing a stuck browser (fake browser) |
 | `tests/test_config.py` | CLI overrides YAML, `--no-fail-on-broken`, validation errors |
 | `tests/test_report.py` | `index.html` and `results.json` counts, HTML escaping, relative paths, screenshot pruning, job summary |
-| `tests/test_integration.py` | At least 2 broken images found on `/broken_images`, and the working image isn't flagged |
+| `tests/test_integration.py` | At least 2 broken images found on `/broken_images` and the working image isn't flagged; an `alert()` on page load is reported as a console error without blocking the crawl |
 
 ## Design Decisions
 
@@ -252,7 +252,7 @@ selenium-link-checker/
 │   └── report.py           results.json, index.html, GitHub job summary
 ├── templates/
 │   └── report.html.j2      the report page
-├── tests/                  unit tests + one integration test
+├── tests/                  unit tests + two integration tests
 ├── .github/workflows/
 │   └── link-check.yml      daily check and Pages deploy
 ├── docs/                   logo and report screenshots for this README
